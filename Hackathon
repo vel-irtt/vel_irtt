@@ -1,0 +1,114 @@
+package org.inceptez.spark.sql
+
+import org.apache.spark.SparkContext
+import org.apache.spark.sql._
+import org.apache.spark.sql.SQLContext
+
+import org.apache.spark._
+import org.apache.spark.streaming._
+import org.apache.spark.sql.SparkSession
+
+object hack2 {
+  case class Insure(id1: String, id2: String, yr: String, stcd: String, srcnm:
+String, network: String, url: String)
+   def main(args:Array[String])
+  {
+
+     val spark=SparkSession.builder().appName("Spark
+Hackathon2").master("local[*]").getOrCreate();
+     var sc1=spark.sparkContext
+     var sqc=spark.sqlContext
+     sc1.setLogLevel("ERROR")
+
+
+     //Insurance file1 load and display
+
+     val insuredata1 =
+sc1.textFile("hdfs://localhost:54310/user/hduser/sparkhack2/insuranceinfo1")
+     val header1 = insuredata1.first()
+     val data1 = insuredata1.filter(x => x != header1)
+     println("Printing the count and first 10 records from insurance file1")
+     val cnt1 = data1.count()
+     println(s"No of lines in total: $cnt1")
+     data1.take(10).foreach(println)
+
+     //Insurance file2 load and display
+
+     val insuredata2 =
+sc1.textFile("hdfs://localhost:54310/user/hduser/sparkhack2/insuranceinfo2")
+     val header2 = insuredata2.first()
+     val data2 = insuredata2.filter(x => x != header2)
+     println("Printing the count and first 10 records from insurance file2")
+     val cnt2 = data2.count()
+     println(s"No of lines in total: $cnt2")
+     data2.take(10).foreach(println)
+
+     //loading RDDS ,remove header, merging of RDDs and improve perfornmance
+
+     val insuredatamerged =   data1.union(data2)
+     insuredatamerged.cache
+     println("Printing the count and first 5 records from merged files")
+     insuredatamerged.take(5).foreach(println)
+     val cntall = insuredatamerged.count()
+     println(s"No of lines in total: $cntall")
+     val uniquemerged = insuredatamerged.distinct
+     val cntalldis = uniquemerged.count()
+     println(s"No of distinct lines in total: $cntalldis")
+     val insuredatarepart = insuredatamerged.repartition(8)
+
+     //Loading 3rd cust_states file
+      val custstates =
+sc1.textFile("hdfs://localhost:54310/user/hduser/sparkhack2/custs_states")
+      val custfilter = custstates.map( x => x.split(",")).filter(l =>
+l.length == 5)
+      val statesfilter = custstates.map( x => x.split(",")).filter(l
+=> l.length == 2)
+
+      custfilter.take(5).foreach(println)
+      println("--------------------")
+      statesfilter.take(5).foreach(println)
+
+      //Create the masking Function
+      def maskingudf(a:String):String =
+      {
+      val mask = a.replace("a",
+"x").replace("b","y").replace("c","z").replace("d","l").replace("m","n").replace("n","o").replaceAll("[0-9]",
+"1")
+      return mask
+      }
+
+     import spark.implicits._
+
+     import org.apache.spark.sql.functions.udf
+     spark.udf.register("mas", maskingudf _)
+     spark.catalog.listFunctions.filter('name like "%masking%").show(false)
+
+
+      // val ins = insuredatarepart.map(x => x.split(",")).map(p =>
+Insure(p(0).toInt, p(1).toInt, p(2).toInt,p(3), p(4), p(5),p(6)))
+     //val ins = insuredatarepart.map(x => x.split(",")).map(p =>
+Insure(p(0).toInt, p(1).toInt, p(2).toInt,p(3).toUpperCase(), p(4),
+p(5).toUpperCase(),p(6)))
+     val ins = insuredatarepart.map(x => x.split(",")).map(p =>
+Insure(p(0), p(1), p(2),p(3).toUpperCase(), p(4),
+p(5).toUpperCase(),maskingudf(p(6))))
+
+     val insure = ins.toDF()
+
+     insure.createOrReplaceTempView("insurance")
+
+      println("::::::::::::Final Results are printed here ::::::::::::::")
+     //val results = spark.sql("Select id1,id2,stcd,network,
+concat(stcd.,network),url,maskingudf(url) from insurance")
+     //val results = spark.sql("Select id1,id2,stcd,network,url from insurance")
+     val results = spark.sql("Select id1,id2,concat(stcd,network),url
+from insurance")
+     results.show(10,false)
+
+     results.write.mode("overwrite").json("hdfs://localhost:54310/user/hduser/sparkhack2/insurance.json")
+     results.write.mode("overwrite").parquet("hdfs://localhost:54310/user/hduser/sparkhack2/insurance.parquet")
+
+
+}
+}
+
